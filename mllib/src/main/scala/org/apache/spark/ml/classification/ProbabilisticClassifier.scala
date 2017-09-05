@@ -112,19 +112,25 @@ abstract class ProbabilisticClassificationModel[
     // This is a bit complicated since it tries to avoid repeated computation.
     var outputData = dataset
     var numColsOutput = 0
+    val bcastModel = dataset.sparkSession.sparkContext.broadcast(this)
     if ($(rawPredictionCol).nonEmpty) {
       val predictRawUDF = udf { (features: Any) =>
-        predictRaw(features.asInstanceOf[FeaturesType])
+        val model = bcastModel.value
+        model.predictRaw(features.asInstanceOf[FeaturesType])
       }
       outputData = outputData.withColumn(getRawPredictionCol, predictRawUDF(col(getFeaturesCol)))
       numColsOutput += 1
     }
     if ($(probabilityCol).nonEmpty) {
       val probUDF = if ($(rawPredictionCol).nonEmpty) {
-        udf(raw2probability _).apply(col($(rawPredictionCol)))
+        udf{ (features: Vector) =>
+          val model = bcastModel.value
+          model.raw2probability(features)
+        } apply (col($(rawPredictionCol)))
       } else {
         val probabilityUDF = udf { (features: Any) =>
-          predictProbability(features.asInstanceOf[FeaturesType])
+          val model = bcastModel.value
+          model.predictProbability(features.asInstanceOf[FeaturesType])
         }
         probabilityUDF(col($(featuresCol)))
       }
@@ -133,12 +139,19 @@ abstract class ProbabilisticClassificationModel[
     }
     if ($(predictionCol).nonEmpty) {
       val predUDF = if ($(rawPredictionCol).nonEmpty) {
-        udf(raw2prediction _).apply(col($(rawPredictionCol)))
+        udf { (features: Vector) =>
+          val model = bcastModel.value
+          model.raw2prediction(features)
+        } apply (col($(rawPredictionCol)))
       } else if ($(probabilityCol).nonEmpty) {
-        udf(probability2prediction _).apply(col($(probabilityCol)))
+        udf { (features: Vector) =>
+          val model = bcastModel.value
+          model.probability2prediction(features)
+        } apply (col($(probabilityCol)))
       } else {
         val predictUDF = udf { (features: Any) =>
-          predict(features.asInstanceOf[FeaturesType])
+          val model = bcastModel.value
+          model.predict(features.asInstanceOf[FeaturesType])
         }
         predictUDF(col($(featuresCol)))
       }
